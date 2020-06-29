@@ -6,3 +6,7 @@ Should all be available on [my Workshop page](https://steamcommunity.com/id/its_
 Current Scripts;
 ----------------
 
+### [Hinge / Rotor drive script](HingeRotor-Drive/)
+
+Handles controlling hinges, rotors, and pistons for use in driving/steering a vehicle.  
+Includes auto-centering as well as velocity scaling for turning angles, and one-way limits.
