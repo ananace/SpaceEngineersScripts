@@ -5,7 +5,7 @@ MIN_SCRIPTS := $(SCRIPTS:.cs=.min.cs)
 	@echo Minifying $<...
 	@sed '/ ==-- /q' $< | \
 	    sed -e 's/@date@/$(shell date +%F)/' \
-	    	-e 's/@revision@/$(shell git rev-parse HEAD)/' \
+	    	-e 's/@revision@/$(shell git rev-parse --short HEAD)/' \
 	    	> $@
 	@echo >> $@
 	@sed -n '/ ==-- /,$$p' $< | csmin >> $@
