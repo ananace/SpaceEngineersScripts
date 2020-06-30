@@ -33,6 +33,8 @@ const string CDPrefix = "!acs";
 *   scaleendmod=0.25 - The value modifier at the end of the scale, 0.25 means that the rotor/piston/hinge will only be allowed to move to 25% of its range - from the center position - as the vehicle reaches the scaleend speed.
 *   lock=0 - Locks the hinge/rotor if the target difference is less than the value specified (less than N deg for rotors/hinges, less than N meters for pistons). Can cause shaking when auto-centering is also enabled.
 *   controller=<name> - Limits the block to only acting on the controller matching the given name or containing the name in their custom data under the specified prefix. (Can't contain spaces)
+*   duplicate=<name> - Makes this block use the same input as the given block, can be matched by name or tag - see below. (Can't contain spaces)
+*   tag=<name> - Tags this block with the given tag, to make it easier to use as a source for duplication. (Also can't contain spaces)
 *
 * Some examples, along with a possible use-case for each;
 *
@@ -143,11 +145,15 @@ public void Main(string _arg, UpdateType updateSource)
 
 			var controller = blockData.Controller ?? MainController;
 
-			BlockInfo.Append($"- {block.CustomName} | {blockData.Input}");
+			BlockInfo.Append($"- {block.CustomName}");
+			if (blockData.DuplicateOf != null)
+				BlockInfo.Append($" | Duplicate of {blockData.DuplicateOf.Block.CustomName}");
+			else
+				BlockInfo.Append($" | {blockData.Input}");
 			if (controller != MainController)
 				BlockInfo.Append($" | Controlled by {controller.CustomName}");
 
-			if (blockData.Input == InputSource.None)
+			if (blockData.Input == InputSource.None && blockData.DuplicateOf == null)
 			{
 				BlockInfo.AppendLine();
 				continue;
@@ -159,81 +165,108 @@ public void Main(string _arg, UpdateType updateSource)
 				continue;
 			}
 
-			float inputVal = 0;
-			switch (blockData.Input)
-			{
-				case InputSource.MoveX: inputVal = controller.MoveIndicator.X; break;
-				case InputSource.MoveY: inputVal = controller.MoveIndicator.Y; break;
-				case InputSource.MoveZ: inputVal = controller.MoveIndicator.Z; break;
-				case InputSource.RotatePitch: inputVal = controller.RotationIndicator.X; break;
-				case InputSource.RotateYaw: inputVal = controller.RotationIndicator.Y; break;
-				case InputSource.RotateRoll: inputVal = controller.RollIndicator; break;
-			}
-
-			if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
-			    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
-				inputVal = 0;
-
 			IMyPistonBase piston = block is IMyPistonBase ? (IMyPistonBase)block : null;
 			IMyMotorStator motor = block is IMyMotorStator ? (IMyMotorStator)block : null;
 
-			float _min = 0, _max = 0, _cur = 0;
-			if (piston != null)
+			float _cur = 0;
+			if (blockData.DuplicateOf != null)
 			{
-				_min = piston.MinLimit;
-				_max = piston.MaxLimit;
-				_cur = piston.CurrentPosition;
-			}
-			else
-			{
-				_min = motor.LowerLimitDeg;
-				_max = motor.UpperLimitDeg;
-				_cur = MathHelper.ToDegrees(motor.Angle);
-			}
+				var duplicated = blockData.DuplicateOf;
+				blockData.TargetValue = duplicated.TargetValue;
 
-			if (scannedData.Lock > 0 && motor != null)
-			{
-				var _lock = Math.Abs(_cur - blockData.TargetValue) < scannedData.Lock;
-				motor.RotorLock = _lock;
-				if (_lock)
-					BlockInfo.Append($" | Locked");
-			}
-
-
-			if (inputVal == 0 && scannedData.Center)
-			{
-				float defaultCenter = (piston != null ? _min + (_max - _min) * 0.5f : 0);
-				blockData.TargetValue = MathHelper.Smooth(blockData.CenterPos ?? defaultCenter, blockData.TargetValue);
-
-				BlockInfo.Append($"\n  Mode: Centering");
-			}
-
-			else
-			{
-				float min = _min, max = _max, scale = 1;
-				if (scannedData.Scale)
+				if (motor != null)
 				{
-					float speed = (float)MainController.GetShipSpeed();
-					if (speed > scannedData.ScaleEnd)
-						scale = scannedData.ScaleEndMod;
-					else if (speed > scannedData.ScaleStart)
-						scale = MathHelper.Lerp(1, scannedData.ScaleEndMod, (speed - scannedData.ScaleStart) / (scannedData.ScaleEnd - scannedData.ScaleStart));
+					_cur = MathHelper.ToDegrees(motor.Angle);
+					if (duplicated.Scanned.Lock > 0)
+					{
+						var _lock = Math.Abs(_cur - blockData.TargetValue) < scannedData.Lock;
+						motor.RotorLock = _lock;
 
-					min = _min * scale;
-					max = _max * scale;
+						if (_lock)
+							BlockInfo.Append($" | Locked");
+					}
+				}
+				else
+					_cur = piston.CurrentPosition;
+
+			}
+			else
+			{
+				float inputVal = 0;
+				switch (blockData.Input)
+				{
+					case InputSource.MoveX: inputVal = controller.MoveIndicator.X; break;
+					case InputSource.MoveY: inputVal = controller.MoveIndicator.Y; break;
+					case InputSource.MoveZ: inputVal = controller.MoveIndicator.Z; break;
+					case InputSource.RotatePitch: inputVal = controller.RotationIndicator.X; break;
+					case InputSource.RotateYaw: inputVal = controller.RotationIndicator.Y; break;
+					case InputSource.RotateRoll: inputVal = controller.RollIndicator; break;
 				}
 
-				inputVal *= (scannedData.Invert ? -scannedData.Speed : scannedData.Speed) * 2 * dt * scale;
+				if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
+			    	    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
+					inputVal = 0;
 
-				blockData.TargetValue = MathHelper.Clamp(blockData.TargetValue + inputVal, min, max);
 
-				// Ensure values don't overflow on rotors
-				if (motor != null)
-					blockData.TargetValue = MathHelper.ToDegrees(MathHelper.WrapAngle(MathHelper.ToRadians(blockData.TargetValue)));
+				float _min = 0, _max = 0;
+				if (piston != null)
+				{
+					_min = piston.MinLimit;
+					_max = piston.MaxLimit;
+					_cur = piston.CurrentPosition;
+				}
+				else
+				{
+					_min = motor.LowerLimitDeg;
+					_max = motor.UpperLimitDeg;
+					_cur = MathHelper.ToDegrees(motor.Angle);
+				}
 
-				BlockInfo.Append($"\n  Mode: {(piston != null ? "Moving" : "Turning")}");
-				if (scannedData.Scale)
-					BlockInfo.Append($" | Scale: {(scale * 100).ToString("N0")}%");
+				if (scannedData.Lock > 0 && motor != null)
+				{
+					var _lock = Math.Abs(_cur - blockData.TargetValue) < scannedData.Lock;
+					motor.RotorLock = _lock;
+
+					if (_lock)
+						BlockInfo.Append($" | Locked");
+				}
+
+
+				if (inputVal == 0 && scannedData.Center)
+				{
+					float defaultCenter = (piston != null ? _min + (_max - _min) * 0.5f : 0);
+					blockData.TargetValue = MathHelper.Smooth(blockData.CenterPos ?? defaultCenter, blockData.TargetValue);
+
+					BlockInfo.Append($"\n  Mode: Centering");
+				}
+
+				else
+				{
+					float min = _min, max = _max, scale = 1;
+					if (scannedData.Scale)
+					{
+						float speed = (float)MainController.GetShipSpeed();
+						if (speed > scannedData.ScaleEnd)
+							scale = scannedData.ScaleEndMod;
+						else if (speed > scannedData.ScaleStart)
+							scale = MathHelper.Lerp(1, scannedData.ScaleEndMod, (speed - scannedData.ScaleStart) / (scannedData.ScaleEnd - scannedData.ScaleStart));
+
+						min = _min * scale;
+						max = _max * scale;
+					}
+
+					inputVal *= (scannedData.Invert ? -scannedData.Speed : scannedData.Speed) * 2 * dt * scale;
+
+					blockData.TargetValue = MathHelper.Clamp(blockData.TargetValue + inputVal, min, max);
+
+					// Ensure values don't overflow on rotors
+					if (motor != null)
+						blockData.TargetValue = MathHelper.ToDegrees(MathHelper.WrapAngle(MathHelper.ToRadians(blockData.TargetValue)));
+
+					BlockInfo.Append($"\n  Mode: {(piston != null ? "Moving" : "Turning")}");
+					if (scannedData.Scale)
+						BlockInfo.Append($" | Scale: {(scale * 100).ToString("N0")}%");
+				}
 			}
 
 			float targetVal;
@@ -341,9 +374,15 @@ void ScanControllers()
 		MainController = Controllers.FirstOrDefault();
 }
 
-IMyShipController FindController(string tag)
+IMyShipController FindController(string _tag)
 {
+	var tag = _tag.ToLower();
 	return Controllers.Find(c => c.CustomName.ToLower().Contains(tag) || (HasCD(c) && GetCDLine(c).Contains(tag)));
+}
+BlockData FindManagedBlock(string _tag)
+{
+	var tag = _tag.ToLower();
+	return ManagedBlocks.Find(b => b.Block.CustomName.ToLower().Contains(tag) || b.Tag.ToLower() == tag);
 }
 
 bool HasCD(IMyTerminalBlock block)
@@ -410,6 +449,14 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block)
 
 					data.Controller = found;
 				} break;
+				case "duplicate": {
+					var found = FindManagedBlock(val);
+					if (found == null)
+						DebugEcho($"D|{block.CustomName}] Unable to find duplicate source '{val}', ignoring");
+
+					data.DuplicateOf = found;
+				} break;
+				case "tag": data.Tag = val; break;
 
 				default: DebugEcho($"D|{block.CustomName}] Found unknown key {key}"); break;
 			}
@@ -456,9 +503,11 @@ class BlockData
 {
 	public float TargetValue = 0;
 	public float? CenterPos = null;
+	public string Tag = "";
 	public InputSource Input = InputSource.None;
 	public InputLimit Limit = InputLimit.None;
 	public ScannedData Scanned = new ScannedData();
 	public IMyFunctionalBlock Block = null;
 	public IMyShipController Controller = null;
+	public BlockData DuplicateOf = null;
 }
