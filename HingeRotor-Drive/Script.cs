@@ -32,6 +32,7 @@ const string CDPrefix = "!acs";
 *   scaleend=25 - The speed (of the vehicle) at which the scaling should end, in m/s.
 *   scaleendmod=0.25 - The value modifier at the end of the scale, 0.25 means that the rotor/piston/hinge will only be allowed to move to 25% of its range - from the center position - as the vehicle reaches the scaleend speed.
 *   lock=0 - Locks the hinge/rotor if the target difference is less than the value specified (less than N deg for rotors/hinges, less than N meters for pistons). Can cause shaking when auto-centering is also enabled.
+*   controller=<name> - Limits the block to only acting on the controller matching the given name or containing the name in their custom data under the specified prefix. (Can't contain spaces)
 *
 * Some examples, along with a possible use-case for each;
 *
@@ -117,7 +118,7 @@ public void Main(string _arg, UpdateType updateSource)
 	if ((updateSource & UpdateType.Update1) == 0)
 		return;
 
-	if (MainController == null)
+	if (!Controllers.Any())
 	{
 		AllEcho($"Drive script is running, but no valid controller found, add one to continue.\n");
 		return;
@@ -130,7 +131,7 @@ public void Main(string _arg, UpdateType updateSource)
 	AllEcho($"Hinge/Rotor Drive script is running.\n\nManaging {ManagedBlocks.Count} block(s)");
 
 	var step = ScriptStep++;
-	var rate = MainController.IsUnderControl ? 2 : 10;
+	var rate = Controllers.Any(c => c.IsUnderControl) ? 2 : 10;
 	if (step % rate == 0)
 	{
 		BlockInfo.Clear();
@@ -140,7 +141,11 @@ public void Main(string _arg, UpdateType updateSource)
 			var scannedData = blockData.Scanned;
 			var block = blockData.Block;
 
+			var controller = blockData.Controller ?? MainController;
+
 			BlockInfo.Append($"- {block.CustomName} | {blockData.Input}");
+			if (controller != MainController)
+				BlockInfo.Append($" | Controlled by {controller.CustomName}");
 
 			if (blockData.Input == InputSource.None)
 			{
@@ -157,12 +162,12 @@ public void Main(string _arg, UpdateType updateSource)
 			float inputVal = 0;
 			switch (blockData.Input)
 			{
-				case InputSource.MoveX: inputVal = MainController.MoveIndicator.X; break;
-				case InputSource.MoveY: inputVal = MainController.MoveIndicator.Y; break;
-				case InputSource.MoveZ: inputVal = MainController.MoveIndicator.Z; break;
-				case InputSource.RotatePitch: inputVal = MainController.RotationIndicator.X; break;
-				case InputSource.RotateYaw: inputVal = MainController.RotationIndicator.Y; break;
-				case InputSource.RotateRoll: inputVal = MainController.RollIndicator; break;
+				case InputSource.MoveX: inputVal = controller.MoveIndicator.X; break;
+				case InputSource.MoveY: inputVal = controller.MoveIndicator.Y; break;
+				case InputSource.MoveZ: inputVal = controller.MoveIndicator.Z; break;
+				case InputSource.RotatePitch: inputVal = controller.RotationIndicator.X; break;
+				case InputSource.RotateYaw: inputVal = controller.RotationIndicator.Y; break;
+				case InputSource.RotateRoll: inputVal = controller.RollIndicator; break;
 			}
 
 			if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
@@ -336,6 +341,11 @@ void ScanControllers()
 		MainController = Controllers.FirstOrDefault();
 }
 
+IMyShipController FindController(string tag)
+{
+	return Controllers.Find(c => c.CustomName.ToLower().Contains(tag) || (HasCD(c) && GetCDLine(c).Contains(tag)));
+}
+
 bool HasCD(IMyTerminalBlock block)
 {
 	return block.CustomData.ToLower().Contains(CDPrefix);
@@ -393,6 +403,14 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block)
 				case "scaleendmod": ret.ScaleEndMod = Single.Parse(val); break;
 				case "lock": ret.Lock = Single.Parse(val); break;
 
+				case "controller": {
+					var found = FindController(val);
+					if (found == null)
+						DebugEcho($"D|{block.CustomName}] Unable to find controller '{val}', ignoring");
+
+					data.Controller = found;
+				} break;
+
 				default: DebugEcho($"D|{block.CustomName}] Found unknown key {key}"); break;
 			}
 		}
@@ -442,4 +460,5 @@ class BlockData
 	public InputLimit Limit = InputLimit.None;
 	public ScannedData Scanned = new ScannedData();
 	public IMyFunctionalBlock Block = null;
+	public IMyShipController Controller = null;
 }
