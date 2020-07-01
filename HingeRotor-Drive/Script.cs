@@ -62,6 +62,15 @@ bool Debug = false;
 
 // ==-- Script Separator --==
 
+/* Still TODO:
+ *
+ * - State storage between reloads
+ * - Zero/Center on leaving active controller
+ * - Cooperative control when running multiple instances on the same vehicle - for rover/trailer separation and the like
+ * - Cooperative control when using multiple simultaneously manned cockpits - main and standby, like in aircraft.
+ * - Further trimming of unnecessary instructions
+ */
+
 IMyShipController MainController;
 List<IMyShipController> Controllers = new List<IMyShipController>();
 List<BlockData> ManagedBlocks = new List<BlockData>();
