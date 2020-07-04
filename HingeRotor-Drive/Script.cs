@@ -65,7 +65,8 @@ bool Debug = false;
 /* Still TODO:
  *
  * - [X] 2D input mode (MoveXZ)
- * - [ ] State storage between reloads
+ *   - [ ] Warn on 2D input on pistons/scale
+ * - [X] State storage between reloads
  * - [ ] Zero/Center on leaving active controller
  * - [ ] Add a no-holding/relative-only mode
  * - [ ] Cooperative control when running multiple instances on the same vehicle - for rover/trailer separation and the like
@@ -91,7 +92,7 @@ IMyTextPanel _logOutput;
 
 public Program()
 {
-	Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
+	Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update100;
 
 	if (Debug)
 	{
@@ -115,6 +116,30 @@ public Program()
 
 	ScanGrid();
 	ScanControllers();
+
+	if (Storage.Any())
+		try
+		{
+			foreach (var stored in Storage.Split(' '))
+			{
+				var parts = stored.Split('=');
+				var entityId = long.Parse(parts[0]);
+				var data = float.Parse(parts[1]);
+
+				var existing = ManagedBlocks.Find(b => b.Block.EntityId == entityId);
+				if (existing != null)
+					existing.TargetValue = data;
+			}
+		}
+		catch (Exception ex)
+		{
+			AllEcho($"Exception {ex} occured when loading, continuing.");
+		}
+}
+
+public void Save()
+{
+	Storage = string.Join(" ", ManagedBlocks.Select(b => string.Join("=", b.Block.EntityId, b.TargetValue)));
 }
 
 const string SpinStr = "-\\|/";
@@ -127,10 +152,8 @@ public void Main(string _arg, UpdateType updateSource)
 	{
 		DebugInfo?.Clear();
 		ScanGrid((step100++ % 10) == 0);
-	}
-
-	if ((updateSource & UpdateType.Update10) != 0)
 		ScanControllers();
+	}
 
 	if ((updateSource & UpdateType.Update1) == 0)
 		return;
@@ -168,6 +191,7 @@ public void Main(string _arg, UpdateType updateSource)
 				BlockInfo.Append($" | Duplicate of {blockData.DuplicateOf.Block.CustomName}");
 			else
 				BlockInfo.Append($" | {blockData.Input}");
+
 			if (controller != MainController)
 				BlockInfo.Append($" | Controlled by {controller.CustomName}");
 
@@ -201,23 +225,13 @@ public void Main(string _arg, UpdateType updateSource)
 				_cur = MathHelper.ToDegrees(motor.Angle);
 			}
 
-
 			if (blockData.DuplicateOf != null)
 			{
 				var duplicated = blockData.DuplicateOf;
 				blockData.TargetValue = duplicated.TargetValue;
 
-				if (motor != null && duplicated.Scanned.Lock > 0)
-				{
-					var _lock = Math.Abs(_cur - blockData.TargetValue) < scannedData.Lock;
-					motor.RotorLock = _lock;
-
-					if (_lock)
-						BlockInfo.Append($" | Locked");
-				}
-
+				scannedData.Lock = duplicated.Scanned.Lock;
 			}
-
 			else if (blockData.Input == InputSource.MoveXZ)
 			{
 				var inputVector = new Vector2(controller.MoveIndicator.X, controller.MoveIndicator.Z);
@@ -226,11 +240,10 @@ public void Main(string _arg, UpdateType updateSource)
 					inputVal = float.MinValue;
 					var targetAngle = MathHelper.ToDegrees(MyMath.ArcTanAngle(inputVector.X, inputVector.Y) + MathHelper.PiOver2);
 					blockData.TargetValue = targetAngle;
+
+					BlockInfo.Append($"\n  Mode: 2D Input | Angle: {blockData.TargetValue}");
 				}
-
-				BlockInfo.Append($"\n  Mode: Turning | Angle: {blockData.TargetValue}");
 			}
-
 			else
 			{
 				switch (blockData.Input)
@@ -246,10 +259,7 @@ public void Main(string _arg, UpdateType updateSource)
 				if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
 				    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
 					inputVal = 0;
-
-
 			}
-
 
 			if (scannedData.Lock > 0 && motor != null)
 			{
@@ -260,42 +270,41 @@ public void Main(string _arg, UpdateType updateSource)
 					BlockInfo.Append($" | Locked");
 			}
 
-
-			if (inputVal == 0 && scannedData.Center)
-			{
-				float defaultCenter = (piston != null ? _min + (_max - _min) * 0.5f : 0);
-				blockData.TargetValue = MathHelper.Smooth(blockData.CenterPos ?? defaultCenter, blockData.TargetValue);
-
-				BlockInfo.Append($"\n  Mode: Centering");
-			}
-
-			else if (blockData.Input != InputSource.MoveXZ)
-			{
-				float min = _min, max = _max, scale = 1;
-				if (scannedData.Scale)
+			if (blockData.DuplicateOf == null)
+				if (inputVal == 0 && scannedData.Center)
 				{
-					float speed = (float)MainController.GetShipSpeed();
-					if (speed > scannedData.ScaleEnd)
-						scale = scannedData.ScaleEndMod;
-					else if (speed > scannedData.ScaleStart)
-						scale = MathHelper.Lerp(1, scannedData.ScaleEndMod, (speed - scannedData.ScaleStart) / (scannedData.ScaleEnd - scannedData.ScaleStart));
+					float defaultCenter = (piston != null ? _min + (_max - _min) * 0.5f : 0);
+					blockData.TargetValue = MathHelper.Smooth(blockData.CenterPos ?? defaultCenter, blockData.TargetValue);
 
-					min = _min * scale;
-					max = _max * scale;
+					BlockInfo.Append($"\n  Mode: Centering");
 				}
+				else if (blockData.Input != InputSource.MoveXZ)
+				{
+					float min = _min, max = _max, scale = 1;
+					if (scannedData.Scale)
+					{
+						float speed = (float)MainController.GetShipSpeed();
+						if (speed > scannedData.ScaleEnd)
+							scale = scannedData.ScaleEndMod;
+						else if (speed > scannedData.ScaleStart)
+							scale = MathHelper.Lerp(1, scannedData.ScaleEndMod, (speed - scannedData.ScaleStart) / (scannedData.ScaleEnd - scannedData.ScaleStart));
 
-				inputVal *= (scannedData.Invert ? -scannedData.Speed : scannedData.Speed) * 2 * dt * scale;
+						min = _min * scale;
+						max = _max * scale;
+					}
 
-				blockData.TargetValue = MathHelper.Clamp(blockData.TargetValue + inputVal, min, max);
+					inputVal *= (scannedData.Invert ? -scannedData.Speed : scannedData.Speed) * MathHelper.Pi * dt * scale;
 
-				// Ensure values don't overflow on rotors
-				if (motor != null)
-					blockData.TargetValue = MathHelper.ToDegrees(MathHelper.WrapAngle(MathHelper.ToRadians(blockData.TargetValue)));
+					blockData.TargetValue = MathHelper.Clamp(blockData.TargetValue + inputVal, min, max);
 
-				BlockInfo.Append($"\n  Mode: {(piston != null ? "Moving" : "Turning")}");
-				if (scannedData.Scale)
-					BlockInfo.Append($" | Scale: {(scale * 100).ToString("N0")}%");
-			}
+					// Ensure values don't overflow on rotors
+					if (motor != null)
+						blockData.TargetValue = MathHelper.ToDegrees(MathHelper.WrapAngle(MathHelper.ToRadians(blockData.TargetValue)));
+
+					BlockInfo.Append($"\n  Mode: {(piston != null ? "Moving" : "Turning")}");
+					if (scannedData.Scale)
+						BlockInfo.Append($" | Scale: {(scale * 100).ToString("N0")}%");
+				}
 
 			float targetVal;
 			if (piston != null)
@@ -312,7 +321,7 @@ public void Main(string _arg, UpdateType updateSource)
 				targetVal = angDiff;
 			}
 
-			var unit = (piston != null ? "m/s" : "deg/s");
+			var unit = (piston != null ? "m/s" : "RPM");
 			BlockInfo.Append($"\n  Target velocity: {targetVal.ToString("N2")} {unit}");
 
 			if (piston != null)
