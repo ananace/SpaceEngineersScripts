@@ -1,52 +1,52 @@
 /*
-* Ananace's Hinge / Rotor drive script
-* https://github.com/ananace/SpaceEngineersScripts
-*
-* rev @revision@ - @date@
-*/
+ * Ananace's Hinge / Rotor drive script
+ * https://github.com/ananace/SpaceEngineersScripts
+ *
+ * rev @revision@ - @date@
+ */
 
 // The prefix for Custom Data
 const string CDPrefix = "!acs";
 
 /* Using the script;
-*
-* Build a vehicle of some kind with pistons, rotors, or hinges, attach at least one seat to it.
-* Configure the moveable blocks that should be controlled using a single-line of Custom Data.
-*
-* The line should start with the prefix specified above and can include the following configuration keys, separated by spaces;
-*   (no)center - Sets the block to attempt to automatically center itself when not actively moving.
-*   (no)inv - Inverts the direction of movement.
-*   (no)scale - Scales the valid range of movement based on the vehicle velocity. 100% below 5m/s, and then slowly decreasing to a target value at the target speed.
-*   onlypos
-*   onlyneg - These limit the affecting input to only acting on either positive or negative values.
-*
-* For controllers the following keywords are valid; (Also prefixed with the Custom Data prefix)
-*   primary - Will make this the main input whenever it's active.
-*   ignore - Will never make this the main input.
-*
-* Additional values can be set in a similar manner, key and default values specified below;
-*   input={movex,movey,movez,rotatepitch,rotateyaw,rotateroll} - Sets what input the block should listen to.
-*   speed=10 - The velocity for movement, per second. Deg/s for rotors/hinges, m/s for pistons.
-*   centerpos=(0) - Overrides the center value for the block for when auto-centering, default if not specified is 0 for rotors/hinges, middle of the range for pistons.
-*   scalestart=5 - The speed (of the vehicle) at which the turning should start scaling, in m/s.
-*   scaleend=25 - The speed (of the vehicle) at which the scaling should end, in m/s.
-*   scaleendmod=0.25 - The value modifier at the end of the scale, 0.25 means that the rotor/piston/hinge will only be allowed to move to 25% of its range - from the center position - as the vehicle reaches the scaleend speed.
-*   lock=0 - Locks the hinge/rotor if the target difference is less than the value specified (less than N deg for rotors/hinges, less than N meters for pistons). Can cause shaking when auto-centering is also enabled.
-*   controller=<name> - Limits the block to only acting on the controller matching the given name or containing the name in their custom data under the specified prefix. (Can't contain spaces)
-*   duplicate=<name> - Makes this block use the same input as the given block, can be matched by name or tag - see below. (Can't contain spaces)
-*   tag=<name> - Tags this block with the given tag, to make it easier to use as a source for duplication. (Also can't contain spaces)
-*
-* Some examples, along with a possible use-case for each;
-*
-*   "!acs input=movex center scale" - For car steering using a hinge/rotor, will limit turning at high speeds to avoid rolling.
-*   "!acs input=rotatepitch center speed=90" - For controlling pitch flaps on an airplane.
-*   "!acs input=movez nocenter inv" - For moving a lift up and down using ceiling-mounted pistons.
-*   "!acs input=rotateroll center scale scaleend=25 scaleendmod=0.05" - For handling rotor-mounted roll thrusters, that should only turn to 5% of their angular limit when the vehicle is above 25m/s
-*   "!acs input=movez center onlypos" - Will extend a piston or rotate a rotor/hinge when pressing space, returning it back to zero again when released. Good for deploying air/ground-brakes.
-*/
+ *
+ * Build a vehicle of some kind with pistons, rotors, or hinges, attach at least one seat/remote control to it.
+ * Configure the moveable blocks that should be controlled using a single-line of Custom Data, some examples are provided below.
+ *
+ * The line should start with the prefix specified above and can include the following configuration keys, separated by spaces;
+ *   (no)center - Sets the block to attempt to automatically center itself when not actively moving. (Default on)
+ *   (no)inv - Inverts the direction of movement. (Default off)
+ *   (no)scale - Scales the valid range of movement based on the vehicle velocity. 100% below 5m/s, and then slowly decreasing to a target value at the target speed. (Default off)
+ *   onlypos
+ *   onlyneg - These limit the affecting input to only acting on either positive or negative values.
+ *
+ * For controllers the following keywords are valid; (Also prefixed with the Custom Data prefix)
+ *   primary - Will make this the main input whenever it's active.
+ *   ignore - Will never make this the main input.
+ *
+ * Additional values can be set in a similar manner, key and default values specified below;
+ *   input={movex,movey,movez,rotatepitch,rotateyaw,rotateroll} - Sets what input the block should listen to.
+ *   speed=10 - The velocity for movement, per second. Deg/s for rotors/hinges, m/s for pistons.
+ *   centerpos=(0) - Overrides the center value for the block for when auto-centering, default if not specified is 0 for rotors/hinges, middle of the range for pistons.
+ *   scalestart=5 - The speed (of the vehicle) at which the turning should start scaling, in m/s.
+ *   scaleend=25 - The speed (of the vehicle) at which the scaling should end, in m/s.
+ *   scaleendmod=0.25 - The value modifier at the end of the scale, 0.25 means that the rotor/piston/hinge will only be allowed to move to 25% of its range - from the center position - as the vehicle reaches the scaleend speed.
+ *   lock=0 - Locks the hinge/rotor if the target difference is less than the value specified (less than N deg for rotors/hinges, less than N meters for pistons). Can cause shaking when auto-centering is also enabled.
+ *   controller=<name> - Limits the block to only acting on the controller matching the given name or containing the name in their custom data under the specified prefix. (Can't contain spaces)
+ *   duplicate=<name> - Makes this block use the same input as the given block, can be matched by name or tag - see below. (Can't contain spaces)
+ *   tag=<name> - Tags this block with the given tag, to make it easier to use as a source for duplication. (Also can't contain spaces)
+ *
+ * Some examples, along with a possible use-case for each;
+ *
+ *   "!acs input=movex center scale" - For car steering using a hinge/rotor, will limit turning at high speeds to avoid rolling.
+ *   "!acs input=rotatepitch center speed=90" - For controlling pitch flaps on an airplane.
+ *   "!acs input=movez nocenter inv" - For moving a lift up and down using ceiling-mounted pistons.
+ *   "!acs input=rotateroll center scale scaleend=25 scaleendmod=0.05" - For handling rotor-mounted roll thrusters, that should only turn to 5% of their angular limit when the vehicle is above 25m/s
+ *   "!acs input=movez center onlypos" - Will extend a piston or rotate a rotor/hinge when pressing space, returning it back to zero again when released. Good for deploying air/ground-brakes.
+ */
 
 // Default values for the configuration can be set here;
-class ScannedData
+class BlockConfig
 {
 	public float Speed = 10,
 		ScaleStart = 10,
@@ -64,11 +64,16 @@ bool Debug = false;
 
 /* Still TODO:
  *
+ * - 2D input mode (MoveXZ)
  * - State storage between reloads
  * - Zero/Center on leaving active controller
+ * - Add a no-holding/relative-only mode
  * - Cooperative control when running multiple instances on the same vehicle - for rover/trailer separation and the like
  * - Cooperative control when using multiple simultaneously manned cockpits - main and standby, like in aircraft.
  * - Further trimming of unnecessary instructions
+ *   - [X] When Scanning
+ *   - [ ] Store controller data
+ *   - [ ] Reduce update rate on locks/non-controlled
  */
 
 IMyShipController MainController;
@@ -112,6 +117,7 @@ public Program()
 	ScanControllers();
 }
 
+const string SpinStr = "-\\|/";
 DateTime last = DateTime.Now;
 public void Main(string _arg, UpdateType updateSource)
 {
@@ -139,9 +145,9 @@ public void Main(string _arg, UpdateType updateSource)
 	float dt = (float)(now - last).TotalSeconds;
 	last = now;
 
-	AllEcho($"Hinge/Rotor Drive script is running.\n\nManaging {ManagedBlocks.Count} block(s)");
-
 	var step = ScriptStep++;
+	AllEcho($"Hinge/Rotor Drive script is running. {SpinStr[(step / 100) % 4]}\n\nManaging {ManagedBlocks.Count} block(s)");
+
 	var rate = Controllers.Any(c => c.IsUnderControl) ? 2 : 10;
 	if (step % rate == 0)
 	{
@@ -151,6 +157,9 @@ public void Main(string _arg, UpdateType updateSource)
 			var blockData = ManagedBlocks[i];
 			var scannedData = blockData.Scanned;
 			var block = blockData.Block;
+
+			if (scannedData == null)
+				continue;
 
 			var controller = blockData.Controller ?? MainController;
 
@@ -173,6 +182,7 @@ public void Main(string _arg, UpdateType updateSource)
 				BlockInfo.AppendLine(" | Turned off");
 				continue;
 			}
+
 
 			IMyPistonBase piston = block is IMyPistonBase ? (IMyPistonBase)block : null;
 			IMyMotorStator motor = block is IMyMotorStator ? (IMyMotorStator)block : null;
@@ -213,7 +223,7 @@ public void Main(string _arg, UpdateType updateSource)
 				}
 
 				if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
-			    	    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
+				    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
 					inputVal = 0;
 
 
@@ -308,9 +318,9 @@ public void Main(string _arg, UpdateType updateSource)
 	Echo(BlockInfo.ToString().TrimEnd());
 
 	if (Debug)
-	    DebugDump();
+		DebugDump();
 	else
-	    Echo("");
+		Echo("");
 
 	AllEcho($"Performance:\n  Instructions: {Runtime.CurrentInstructionCount} / {Runtime.MaxInstructionCount}\n  Runtime: {Runtime.LastRunTimeMs} ms");
 
@@ -412,11 +422,17 @@ string GetCDLine(IMyTerminalBlock block)
 void ScanBlock(BlockData data, IMyFunctionalBlock block)
 {
 	data.Block = block;
-	var ret = data.Scanned;
 
 	var line = GetCDLine(block);
 	if (line == null)
 		return;
+
+	int hash = line.GetHashCode();
+	if (hash == data.CDHash)
+		return;
+
+	data.CDHash = hash;
+	var ret = data.Scanned = new BlockConfig();
 
 	try
 	{
@@ -432,7 +448,7 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block)
 			{
 				case "!acs": break;
 
-				// Toggles
+					     // Toggles
 				case "center": ret.Center = true; break;
 				case "nocenter": ret.Center = false; break;
 				case "inv": ret.Invert = true; break;
@@ -442,7 +458,7 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block)
 				case "onlypos": data.Limit = InputLimit.PositiveOnly; break;
 				case "onlyneg": data.Limit = InputLimit.NegativeOnly; break;
 
-				// Parameters
+						// Parameters
 				case "input": data.Input = (InputSource)Enum.Parse(typeof(InputSource), val, true); break;
 				case "speed": ret.Speed = Single.Parse(val); break;
 				case "centerpos": data.CenterPos = Single.Parse(val); break;
@@ -452,19 +468,19 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block)
 				case "lock": ret.Lock = Single.Parse(val); break;
 
 				case "controller": {
-					var found = FindController(val);
-					if (found == null)
-						DebugEcho($"D|{block.CustomName}] Unable to find controller '{val}', ignoring");
+							   var found = FindController(val);
+							   if (found == null)
+								   DebugEcho($"D|{block.CustomName}] Unable to find controller '{val}', ignoring");
 
-					data.Controller = found;
-				} break;
+							   data.Controller = found;
+						   } break;
 				case "duplicate": {
-					var found = FindManagedBlock(val);
-					if (found == null)
-						DebugEcho($"D|{block.CustomName}] Unable to find duplicate source '{val}', ignoring");
+							  var found = FindManagedBlock(val);
+							  if (found == null)
+								  DebugEcho($"D|{block.CustomName}] Unable to find duplicate source '{val}', ignoring");
 
-					data.DuplicateOf = found;
-				} break;
+							  data.DuplicateOf = found;
+						  } break;
 				case "tag": data.Tag = val; break;
 
 				default: DebugEcho($"D|{block.CustomName}] Found unknown key {key}"); break;
@@ -513,9 +529,10 @@ class BlockData
 	public float TargetValue = 0;
 	public float? CenterPos = null;
 	public string Tag = "";
+	public int CDHash = 0;
 	public InputSource Input = InputSource.None;
 	public InputLimit Limit = InputLimit.None;
-	public ScannedData Scanned = new ScannedData();
+	public BlockConfig Scanned = null;
 	public IMyFunctionalBlock Block = null;
 	public IMyShipController Controller = null;
 	public BlockData DuplicateOf = null;
