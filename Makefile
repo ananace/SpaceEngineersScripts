@@ -7,7 +7,7 @@ MIN_SCRIPTS := $(SCRIPTS:.cs=.min.cs)
 	    sed -e 's/@date@/$(shell date +%F)/' \
 	    	-e 's/@revision@/$(shell git rev-parse --short HEAD)/' \
 	    	> $@
-	@echo "// Minified script below, avoid breaking." >> $@
+	@echo "// Minified script below, please avoid breaking." >> $@
 	@echo >> $@
 	@sed -n '/ ==-- /,$$p' $< | csmin >> $@
 
