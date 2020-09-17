@@ -13,6 +13,9 @@ const string CDPrefix = "!acs";
  * Build a vehicle of some kind with pistons, rotors, or hinges, attach at least one seat/remote control to it.
  * Configure the moveable blocks that should be controlled using a single-line of Custom Data, some examples are provided below.
  *
+ * For advanced use, you can have multiple input profiles, switching between them by running the PB with the wanted profile as the argument.
+ * If you start the argument with an '!' you'll toggle the profile, returning back to "primary" if you're already in the named profile.
+ *
  * The line should start with the prefix specified above and can include the following configuration keys, separated by spaces;
  *   (no)center - Sets the block to attempt to automatically center itself when not actively moving. (Default on)
  *   (no)inv - Inverts the direction of movement. (Default off)
@@ -33,6 +36,7 @@ const string CDPrefix = "!acs";
  *   scaleendmod=0.25 - The value modifier at the end of the scale, 0.25 means that the rotor/piston/hinge will only be allowed to move to 25% of its range - from the center position - as the vehicle reaches the scaleend speed.
  *   lock=0 - Locks the hinge/rotor if the target difference is less than the value specified (less than N deg for rotors/hinges, less than N meters for pistons). Can cause shaking when auto-centering is also enabled.
  *   controller=<name> - Limits the block to only acting on the controller matching the given name or containing the name in their custom data under the specified prefix. (Can't contain spaces)
+ *   profile=<name> (primary) - Limits the block to only acting when the profile matching the given name is active, default profile is "primary". (Can't contain spaces)
  *   duplicate=<name> - Makes this block use the same input as the given block, can be matched by name or tag - see below. (Can't contain spaces)
  *   tag=<name> - Tags this block with the given tag, to make it easier to use as a source for duplication. (Also can't contain spaces)
  *
@@ -75,6 +79,8 @@ bool Debug = false;
  *   - [X] When Scanning
  *   - [ ] Store controller data
  *   - [ ] Reduce update rate on locks/non-controlled
+ * - [X] Add a profile system for multiple input profiles
+ *   - [ ] Support multiple profiles on the same block
  */
 
 IMyShipController MainController;
@@ -86,6 +92,7 @@ StringBuilder DebugInfo;
 Action DebugDump = () => {};
 Action<string> RealEcho = s => {};
 Action<string> AllEcho = s => {};
+string ActiveProfile = "primary";
 
 int ScriptStep = 0, step100=0;
 IMyTextPanel _logOutput;
@@ -120,7 +127,10 @@ public Program()
 	if (Storage.Any())
 		try
 		{
-			foreach (var stored in Storage.Split(' '))
+			var storageparts = Storage.Split('|');
+			if (storageparts.Length > 1)
+				ActiveProfile = storageparts.First();
+			foreach (var stored in storageparts.Last().Split(' '))
 			{
 				var parts = stored.Split('=');
 				var entityId = long.Parse(parts[0]);
@@ -139,14 +149,26 @@ public Program()
 
 public void Save()
 {
-	Storage = string.Join(" ", ManagedBlocks.Select(b => string.Join("=", b.Block.EntityId, b.TargetValue)));
+	Storage = ActiveProfile + "|" + string.Join(" ", ManagedBlocks.Select(b => string.Join("=", b.Block.EntityId, b.TargetValue)));
 }
 
 const string SpinStr = "-\\|/";
 DateTime last = DateTime.Now;
-public void Main(string _arg, UpdateType updateSource)
+public void Main(string arg, UpdateType updateSource)
 {
 	_logOutput?.WriteText(" ", false);
+
+	if (!string.IsNullOrEmpty(arg))
+	{
+		if (arg[0] == '!')
+		{
+			arg = arg.Substring(1);
+			if (arg == ActiveProfile)
+				arg = "primary";
+		}
+		
+		ActiveProfile = arg;
+	}
 
 	if ((updateSource & UpdateType.Update100) != 0)
 	{
@@ -169,7 +191,7 @@ public void Main(string _arg, UpdateType updateSource)
 	last = now;
 
 	var step = ScriptStep++;
-	AllEcho($"Hinge/Rotor Drive script is running. {SpinStr[(step / 100) % 4]}\n\nManaging {ManagedBlocks.Count} block(s)");
+	AllEcho($"Hinge/Rotor Drive script is running. Profile: {ActiveProfile} {SpinStr[(step / 100) % 4]}\n\nManaging {ManagedBlocks.Count} block(s)");
 
 	var rate = Controllers.Any(c => c.IsUnderControl) ? 2 : 10;
 	if (step % rate == 0)
@@ -232,34 +254,39 @@ public void Main(string _arg, UpdateType updateSource)
 
 				scannedData.Lock = duplicated.Scanned.Lock;
 			}
-			else if (blockData.Input == InputSource.MoveXZ)
+			else if ((blockData.Profile == null && ActiveProfile == "primary") || blockData.Profile == ActiveProfile)
 			{
-				var inputVector = new Vector2(controller.MoveIndicator.X, controller.MoveIndicator.Z);
-				if (inputVector.LengthSquared() > 0)
+				if (blockData.Input == InputSource.MoveXZ)
 				{
-					inputVal = float.MinValue;
-					var targetAngle = MathHelper.ToDegrees(MyMath.ArcTanAngle(inputVector.X, inputVector.Y) + MathHelper.PiOver2);
-					blockData.TargetValue = targetAngle;
+					var inputVector = new Vector2(controller.MoveIndicator.X, controller.MoveIndicator.Z);
+					if (inputVector.LengthSquared() > 0)
+					{
+						inputVal = float.MinValue;
+						var targetAngle = MathHelper.ToDegrees(MyMath.ArcTanAngle(inputVector.X, inputVector.Y) + MathHelper.PiOver2);
+						blockData.TargetValue = targetAngle;
 
-					BlockInfo.Append($"\n  Mode: 2D Input | Angle: {blockData.TargetValue}");
+						BlockInfo.Append($"\n  Mode: 2D Input | Angle: {blockData.TargetValue}");
+					}
+				}
+				else
+				{
+					switch (blockData.Input)
+					{
+						case InputSource.MoveX: inputVal = controller.MoveIndicator.X; break;
+						case InputSource.MoveY: inputVal = controller.MoveIndicator.Y; break;
+						case InputSource.MoveZ: inputVal = controller.MoveIndicator.Z; break;
+						case InputSource.RotatePitch: inputVal = controller.RotationIndicator.X; break;
+						case InputSource.RotateYaw: inputVal = controller.RotationIndicator.Y; break;
+						case InputSource.RotateRoll: inputVal = controller.RollIndicator; break;
+					}
+
+					if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
+				    	    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
+						inputVal = 0;
 				}
 			}
 			else
-			{
-				switch (blockData.Input)
-				{
-					case InputSource.MoveX: inputVal = controller.MoveIndicator.X; break;
-					case InputSource.MoveY: inputVal = controller.MoveIndicator.Y; break;
-					case InputSource.MoveZ: inputVal = controller.MoveIndicator.Z; break;
-					case InputSource.RotatePitch: inputVal = controller.RotationIndicator.X; break;
-					case InputSource.RotateYaw: inputVal = controller.RotationIndicator.Y; break;
-					case InputSource.RotateRoll: inputVal = controller.RollIndicator; break;
-				}
-
-				if ((inputVal > 0 && blockData.Limit == InputLimit.NegativeOnly) ||
-				    (inputVal < 0 && blockData.Limit == InputLimit.PositiveOnly))
-					inputVal = 0;
-			}
+				BlockInfo.Append($"\n  Not active in current profile");
 
 			if (scannedData.Lock > 0 && motor != null)
 			{
@@ -322,6 +349,7 @@ public void Main(string _arg, UpdateType updateSource)
 			}
 
 			var unit = (piston != null ? "m/s" : "RPM");
+			BlockInfo.Append($"\n  Target position: {blockData.TargetValue.ToString("N2")}");
 			BlockInfo.Append($"\n  Target velocity: {targetVal.ToString("N2")} {unit}");
 
 			if (piston != null)
@@ -359,7 +387,7 @@ void ScanGrid(bool force = false)
 	for (int i = 0; i < scannedObjects.Count; ++i)
 	{
 		var block = scannedObjects[i];
-		if (GetCDLine(block).ToLower().Contains("ignore"))
+		if (GetCDLines(block).All((l) => l.ToLowerInvariant().Contains("ignore")))
 			continue;
 
 		var existing = ManagedBlocks.Find(b => b.Block == block);
@@ -389,19 +417,20 @@ void ScanControllers()
 		if (!controller.CanControlShip)
 			continue;
 
-		var line = GetCDLine(controller);
-		if (line != null)
-		{
-			line = line.ToLower();
-			if (line.Contains("primary"))
+		var lines = GetCDLines(controller);
+		if (lines.Any())
+			foreach (var line in lines)
 			{
-				MainController = controller;
-				return;
-			}
+				var lowercase = line.ToLowerInvariant();
+				if (lowercase.Contains("primary"))
+				{
+					MainController = controller;
+					return;
+				}
 
-			if (line.Contains("ignore"))
-				continue;
-		}
+				if (lowercase.Contains("ignore"))
+					continue;
+			}
 
 		potential.Add(controller);
 	}
@@ -414,7 +443,7 @@ void ScanControllers()
 IMyShipController FindController(string _tag)
 {
 	var tag = _tag.ToLower();
-	return Controllers.Find(c => c.CustomName.ToLower().Contains(tag) || (HasCD(c) && GetCDLine(c).Contains(tag)));
+	return Controllers.Find(c => c.CustomName.ToLower().Contains(tag) || (HasCD(c) && GetCDLines(c).Any((l) => l.Contains(tag))));
 }
 BlockData FindManagedBlock(string _tag)
 {
@@ -427,21 +456,27 @@ bool HasCD(IMyTerminalBlock block)
 	return block.CustomData.ToLower().Contains(CDPrefix);
 }
 
-string GetCDLine(IMyTerminalBlock block)
+string[] GetCDLines(IMyTerminalBlock block)
 {
 	var data = block.CustomData.ToLower();
 	if (!data.Contains(CDPrefix))
-		return null;
+		return new string[0];
 
 	var split = data.Split("\n".ToCharArray(), StringSplitOptions.RemoveEmptyEntries);
-	return Array.Find(split, (s) => s.StartsWith(CDPrefix));
+	return Array.FindAll(split, (s) => s.StartsWith(CDPrefix));
 }
 
 void ScanBlock(BlockData data, IMyFunctionalBlock block, bool force = false)
 {
 	data.Block = block;
 
-	var line = GetCDLine(block);
+	var lines = GetCDLines(block);
+	string line = Array.Find(lines, (l) => {
+		if (string.IsNullOrEmpty(data.Profile))
+			return true;
+		return l.Contains(data.Profile) || (data.Profile == "primary" && !l.Contains("profile="));
+	});
+
 	if (line == null)
 	{
 		data.Scanned = null;
@@ -503,6 +538,7 @@ void ScanBlock(BlockData data, IMyFunctionalBlock block, bool force = false)
 							  data.DuplicateOf = found;
 						  } break;
 				case "tag": data.Tag = val; break;
+				case "profile": data.Profile = val; break;
 
 				default: DebugEcho($"D|{block.CustomName}] Found unknown key {key}"); break;
 			}
@@ -552,6 +588,7 @@ class BlockData
 	public float TargetValue = 0;
 	public float? CenterPos = null;
 	public string Tag = "";
+	public string Profile = null;
 	public int? CDHash = null;
 	public InputSource Input = InputSource.None;
 	public InputLimit Limit = InputLimit.None;
